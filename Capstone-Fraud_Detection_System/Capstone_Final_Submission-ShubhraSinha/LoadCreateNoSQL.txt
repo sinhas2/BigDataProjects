@@ -1,0 +1,49 @@
+Task 1:
+Write a script to load the transactions history data (card_transactions.csv) in a NoSQL database.
+Write a script to create a look-up table with columns specified earlier in the problem statement.
+
+Scripts:
+
+1. Script to create (INTERNAL) card_transactions temporary hive table to load the given CSV
+hive> CREATE TABLE card_transactions_tmp (card_id string, member_id string, amount double, postcode string, pos_id bigint, transaction_dt string, status string)  ROW FORMAT DELIMITED FIELDS TERMINATED BY ',' LOCATION '/user/root/creditcard/temporary/card_transactions_tmp' TBLPROPERTIES ("skip.header.line.count"="1");
+
+2. Script to load initially card_transactions data from csv
+hive> load data local inpath '/home/ec2-user/card_transactions.csv' overwrite into table card_transactions_tmp;
+
+3. Check the data loaded
+hive> select * from card_transactions_tmp limit 10;
+
+4. Create card_transactions table (HIVE-HABSE integrated table)
+[root@ip-10-0-0-201 ~]# hbase shell
+hbase(main):001:0> create 'card_transactions','cardtransactions';
+hbase(main):002:0* create 'card_lookup','lookup';
+
+NOTE: For creating HIVE-HBASE integrated table, we need to first create a HBase table and then integrate with hive table, HIVE external creation works only on existing HBase table.
+
+Creating external table in hive
+hive> CREATE EXTERNAL TABLE card_transaction (key struct<member_id:string, transaction_dt:string, amount:double>, card_id string,  postcode string,  pos_id bigint,  status string)  ROW FORMAT DELIMITED COLLECTION ITEMS TERMINATED BY '~'  STORED BY  'org.apache.hadoop.hive.hbase.HBaseStorageHandler'  WITH SERDEPROPERTIES ("hbase.columns.mapping" = ":key, cardtransactions:card_id, cardtransactions:postcode, cardtransactions:pos_id, cardtransactions:status") TBLPROPERTIES("hbase.table.name" = "card_transactions","hbase.mapred.output.outputtable" = "card_transactions");
+
+5. Insert data from card_transactions_tmp table to hive-hbase table
+hive> INSERT OVERWRITE TABLE card_transaction SELECT named_struct('member_id',ct.member_id,'transaction_dt',ct.transaction_dt,'amount',ct.amount), ct.card_id, ct.postcode, ct.pos_id, ct.status  FROM card_transactions_tmp ct; 
+
+6. Check if the data is inserted in hive
+hive> select * from card_transaction limit 10;
+
+7. Check if the data is inserted in hbase
+hbase(main):002:0> scan 'card_transactions', {'LIMIT' => 5}
+
+8. Script to create final lookup table (HIVE-HABSE integrated)
+hive> CREATE EXTERNAL TABLE IF NOT EXISTS card_lookup (
+    > card_id string,
+    > UCL decimal,
+    > postcode string,
+    > transaction_dt string,
+    > score bigint)
+    > STORED BY 'org.apache.hadoop.hive.hbase.HBaseStorageHandler'
+    > WITH SERDEPROPERTIES ("hbase.columns.mapping" = ":key,
+    > lookup:UCL,
+    > lookup:postcode,
+    > lookup:transaction_dt,
+    > lookup:score")
+    > TBLPROPERTIES("hbase.table.name" = "card_lookup" ,
+    > "hbase.mapred.output.outputtable" = "card_lookup" );

@@ -1,0 +1,39 @@
+Task 3: Write a script to calculate the moving average and standard deviation of the last 10 transactions for each card_id for the data present in Hadoop and NoSQL database. If the total number of transactions for a particular card_id is less than 10, then calculate the parameters based on the total number of records available for that card_id. The script should be able to extract and feed the other relevant data (‘postcode’, ‘transaction_dt’, ‘score’, etc.) for the look-up table along with card_id and UCL.
+
+Scripts:
+ 
+1. Create raw lookup table 
+ 
+#> CREATE TABLE IF NOT EXISTS card_lookup_raw ( card_id string, member_id string, ucl decimal) LOCATION '/user/root/creditcard/temporary/card_lookup_raw'; 
+ 
+ 	 
+2. Insert data into card_lookup_raw table 
+ 
+#> INSERT OVERWRITE TABLE card_lookup_raw SELECT card_id,  member_id, (AVG(amount) + (3 * STDDEV_POP(amount))) as ucl  FROM (SELECT card_id,  key.member_id as member_id,  key.amount as amount, row_number() OVER (PARTITION BY card_id order by UNIX_TIMESTAMP(key.transaction_dt, 'dd-MM-yyyy HH:mm:ss') desc) as rank FROM card_transaction WHERE status = "GENUINE") a WHERE rank <= 10 GROUP BY card_id, member_id; 
+ 
+3. Check if the data is inserted 
+#> select * from card_lookup_raw limit 10; 
+ 
+4. Create temporary lookup table  
+#> CREATE TABLE IF NOT EXISTS card_lookup_tmp ( card_id string, member_id string, ucl decimal, score bigint) LOCATION '/user/root/creditcard/temporary/card_lookup_tmp'; 
+ 
+5. Insert UCL, score data into card_lookup_tmp by joining member_score and card_lookup_raw tables
+#> INSERT OVERWRITE TABLE card_lookup_tmp SELECT r.card_id, r.member_id, r.ucl, m.score FROM card_lookup_raw r JOIN member_score m ON (r.member_id = m.member_id); 
+ 
+6. Check if the data is inserted 
+#> select * from card_lookup_tmp limit 10; 
+ 
+7. Create lookup temporary table for card transaction 
+#> CREATE TABLE IF NOT EXISTS lookup_tmp_trans ( card_id string, postcode string, transaction_dt string) LOCATION '/user/root/creditcard/temporary/ lookup_tmp_trans'; 
+ 
+8. Insert into lookup_tmp_trans, a record with latest GENUINE transaction date and postcode  
+#> INSERT OVERWRITE TABLE lookup_tmp_trans SELECT card_id,  postcode,  transaction_dt FROM (SELECT card_id , postcode, key.transaction_dt as transaction_dt, row_number() OVER (PARTITION BY card_id  ORDER BY UNIX_TIMESTAMP(key.transaction_dt, 'dd-MM-yyyy HH:mm:ss') desc) as rank FROM card_transaction WHERE status = 'GENUINE') a WHERE rank == 1; 
+ 
+9. Check if the data is inserted correctly
+#> select * from lookup_tmp_trans limit 10; 
+ 
+10. Insert into final lookup table (hive-hbase integrated) 
+#> INSERT OVERWRITE TABLE card_lookup SELECT l.card_id, l.ucl, t.postcode, t.transaction_dt, l.score FROM card_lookup_tmp l  JOIN lookup_tmp_trans t ON l.card_id = t.card_id; 
+
+11. Check if the data is inserted correctly
+#> select * from card_lookup limit 10; 

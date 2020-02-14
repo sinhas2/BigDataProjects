@@ -1,0 +1,46 @@
+Task 2: Write a script to ingest the relevant data from AWS RDS to Hadoop.
+
+Scripts:
+1. Switching to hdfs user
+#> sudo -i su - hdfs 
+
+2. Create Sqoop job to import card_member data incrementally from AWS RDS
+#> set sqoop.metastore.client.record.password=true; 
+#> sqoop job --create job_card_member_incremental -- import --connect jdbc:mysql://upgradawsrds.cpclxrkdvwmz.us-east-1.rds.amazonaws.com/cred_financials_data -username upgraduser --password upgraduser --table card_member --incremental append --check-column member_joining_dt --last-value "2000-01-01 00:00:00" --target-dir /user/root/creditcard/final/card_member 
+ 
+3. Look for the listed Sqoop job
+#> sqoop job --list 
+ 
+4. View the configuration of the job 
+#> sqoop job --show job_card_member_incremental 
+ 
+5. Execute the job to load initial data 
+#> sqoop job --exec job_card_member_incremental 
+ 
+6. List contents of /user/root/creditcard/card_member, to check if the import is working 
+#> hadoop fs -ls /user/root/creditcard/final/card_member 
+
+7. Create card_member table 
+CREATE EXTERNAL TABLE IF NOT EXISTS card_member ( card_id string, member_id string, member_joining_dt timestamp, card_purchase_dt string, country string, city string) row format delimited fields terminated by ',' location '/user/root/creditcard/final/card_member'; 
+ 
+8. Check if the data is inserted  (Data automatically loaded into table)
+#> select * from card_member limit 10; 
+ 
+9. Script to insert/load data from hadoop into card_member table (Load data is not required)
+#> load data inpath '/user/root/creditcard/final/card_member/part*' into table card_member; 
+ 
+10. Create Sqoop job to import member_score data from AWS RDS ( It need to be refreshed in 4 hours) 
+#> set sqoop.metastore.client.record.password=true; 
+#> sqoop job --create job_member_score_complete -- import --connect jdbc:mysql://upgradawsrds.cpclxrkdvwmz.us-east-1.rds.amazonaws.com/cred_financials_data -username upgraduser --password upgraduser --table member_score --target-dir /user/root/creditcard/temporary/member_score 
+ 
+11. Execute to load the initial data 
+#> sqoop job --exec job_member_score_complete 
+ 
+12. Create member_score table 
+#> CREATE EXTERNAL TABLE IF NOT EXISTS member_score ( member_id string, score bigint) row format delimited fields terminated by ',' location '/user/root/creditcard/final/member_score'; 
+ 
+13. Load member_score table 
+#> load data inpath '/user/root/creditcard/temporary/member_score/part*' overwrite into table member_score; 
+ 
+14. Check if the data is inserted 
+#> select * from member_score  limit 10; 
